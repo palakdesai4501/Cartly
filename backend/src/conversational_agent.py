@@ -7,7 +7,7 @@ Unified AI agent that handles:
     3. Image-based product search (vision AI → semantic search)
 
 The agent uses:
-    - Google Gemini 2.0 for vision analysis and conversation
+    - Google Gemini (google-genai SDK) for vision analysis
     - BAML for type-safe LLM function calls
     - Pinecone + sentence-transformers for semantic product search
     - SearchEngine for vector similarity search and product retrieval
@@ -26,7 +26,8 @@ from PIL import Image
 import io
 import logging
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from baml_client import b
 from src.search_engine import SearchEngine
 
@@ -48,8 +49,8 @@ class ConversationalAgent:
         self.data_path = data_path
         
         # Initialize Gemini for image analysis (lazy load)
-        self.genai_configured = False
-        self.vision_model = None
+        self.genai_client = None
+        self.vision_model_name = 'gemini-3.1-flash-lite'
         
         # Agent identity
         self.agent_name = "Cartly"
@@ -61,13 +62,10 @@ class ConversationalAgent:
             from src.search_engine import SearchEngine
             self.search_engine = SearchEngine(self.data_path)
     
-    def _ensure_vision_model(self):
-        """Lazy load vision model to save memory."""
-        if not self.genai_configured:
-            genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-            self.genai_configured = True
-        if self.vision_model is None:
-            self.vision_model = genai.GenerativeModel('gemini-2.0-flash-lite')
+    def _ensure_genai_client(self):
+        """Lazy load the Gemini client to save memory."""
+        if self.genai_client is None:
+            self.genai_client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
     
     def process_message(self, 
                        message: str, 
@@ -335,13 +333,10 @@ class ConversationalAgent:
         """Analyze image content using Gemini Vision."""
         try:
             # Ensure vision model is loaded
-            self._ensure_vision_model()
+            self._ensure_genai_client()
 
-            # Prepare image for Gemini
-            image_part = {
-                "mime_type": "image/jpeg",
-                "data": image_data
-            }
+            # Prepare image for Gemini (google-genai SDK)
+            image_part = types.Part.from_bytes(data=image_data, mime_type='image/jpeg')
 
             prompt = """
             Analyze this product image and extract key searchable attributes.
@@ -358,7 +353,10 @@ class ConversationalAgent:
             Be specific and concise. Focus on attributes that would help find similar products in an e-commerce catalog.
             """
 
-            response = self.vision_model.generate_content([prompt, image_part])
+            response = self.genai_client.models.generate_content(
+                model=self.vision_model_name,
+                contents=[prompt, image_part],
+            )
             return response.text.strip()
 
         except Exception as e:
@@ -549,6 +547,7 @@ class ConversationalAgent:
     
     def explain_product(self, product_id: str, user_query: str) -> str:
         """Get detailed explanation for a product recommendation."""
+        self._ensure_search_engine()
         return self.search_engine.get_product_explanation(product_id, user_query)
 
 
