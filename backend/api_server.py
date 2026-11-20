@@ -155,6 +155,11 @@ def chat():
             except Exception as e:
                 logger.warning(f"Failed to clean up temp image: {str(e)}")
 
+        # Surface agent failures as a real 5xx (same JSON shape) so the
+        # frontend can distinguish them from successful responses.
+        if isinstance(response, dict) and response.get('type') == 'error':
+            return jsonify(response), 500
+
         return jsonify(response)
 
     except Exception as e:
@@ -174,6 +179,27 @@ def agent_info():
         return jsonify(info)
     except Exception as e:
         logger.error(f"Agent info endpoint error: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/explain/<product_id>', methods=['POST'])
+def explain_product(product_id):
+    """
+    Explain why a product was recommended.
+
+    Request Body (JSON):
+        { "query": "original user query" }
+
+    Returns:
+        JSON with an 'explanation' string, matching what the frontend
+        services/api.ts explainProduct() expects.
+    """
+    try:
+        data = request.json or {}
+        query = data.get('query', '')
+        explanation = get_agent().explain_product(product_id, query)
+        return jsonify({'explanation': explanation})
+    except Exception as e:
+        logger.error(f"Explain endpoint error: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/health', methods=['GET'])
